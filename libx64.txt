@@ -5,6 +5,7 @@ Write a program to create two processes. First process takes a string and
 passes it to second process through a pipe. The second process 
 concatenates the received string with another string without using string 
 function and sends it back to the first process for printing. 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -231,11 +232,167 @@ int main() {
 
     return 0;
 }
+
+
 //gcc -o cpu_load cpu_load.c -lssh
 
+------------------------------------------------------------------------------------------------------------------------------------------
+//second solution
+------------------
+Node B server:
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <time.h>
+
+#define PORT 8080
+
+// Function to calculate CPU load
+float get_cpu_load() {
+    FILE *fp;
+    char buffer[1024];
+    unsigned long long int user, nice, system, idle, iowait, irq, softirq, steal;
+    unsigned long long int total1, total2, idle1, idle2;
+
+    // First read
+    fp = fopen("/proc/stat", "r");
+    if (fp == NULL) {
+        perror("Failed to open /proc/stat");
+        exit(EXIT_FAILURE);
+    }
+    fgets(buffer, sizeof(buffer), fp);
+    sscanf(buffer, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+           &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal);
+    fclose(fp);
+
+    total1 = user + nice + system + idle + iowait + irq + softirq + steal;
+    idle1 = idle + iowait;
+
+    sleep(1); // Wait for a second to compute load difference
+
+    // Second read
+    fp = fopen("/proc/stat", "r");
+    if (fp == NULL) {
+        perror("Failed to open /proc/stat");
+        exit(EXIT_FAILURE);
+    }
+    fgets(buffer, sizeof(buffer), fp);
+    sscanf(buffer, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+           &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal);
+    fclose(fp);
+
+    total2 = user + nice + system + idle + iowait + irq + softirq + steal;
+    idle2 = idle + iowait;
+
+    // Calculate CPU load percentage
+    float cpu_load = 100.0 * (1.0 - (float)(idle2 - idle1) / (total2 - total1));
+    return cpu_load;
+}
+
+int main() {
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int addrlen = sizeof(address);
+    char buffer[1024] = {0};
+
+    // Create socket
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Bind the socket
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("Bind failed");
+        close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    // Listen for connections
+    if (listen(server_fd, 3) < 0) {
+        perror("Listen failed");
+        close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+    printf("Server is waiting for connections...\n");
+
+    // Accept a connection
+    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) {
+        perror("Accept failed");
+        close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    // Calculate CPU load and send to client
+    float cpu_load = get_cpu_load();
+    snprintf(buffer, sizeof(buffer), "CPU Load: %.2f%%\n", cpu_load);
+    send(new_socket, buffer, strlen(buffer), 0);
+
+    printf("Sent CPU load to client: %.2f%%\n", cpu_load);
+    close(new_socket);
+    close(server_fd);
+    return 0;
+}
+
+
+Node A client:
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+#define PORT 8080
+#define SERVER_IP "127.0.0.1" // Change to the IP address of Node B
+
+int main() {
+    int sock = 0;
+    struct sockaddr_in serv_addr;
+    char buffer[1024] = {0};
+
+    // Create socket
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("Socket creation error");
+        exit(EXIT_FAILURE);
+    }
+
+    // Set server address
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(PORT);
+
+    // Convert IPv4 and IPv6 addresses from text to binary form
+    if (inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
+        perror("Invalid address or Address not supported");
+        exit(EXIT_FAILURE);
+    }
+
+    // Connect to the server
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("Connection failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Receive CPU load from server
+    read(sock, buffer, sizeof(buffer));
+    printf("Received from server: %s", buffer);
+
+    close(sock);
+    return 0;
+}
+
+
+----------------------------------------------------------------------------------------------------------------------------------------
 ii) 
 Write a client C program that reads counter value between sem_wait() and 
 sem_post(). Access shared memory using open().
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
